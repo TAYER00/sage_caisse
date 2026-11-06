@@ -1,0 +1,10 @@
+pyodbc           # Connexion SQL Server en LECTURE SEULE sur Sage
+python-dotenv    # Lecture du fichier .env (configuration non versionnee)
+pytest           # Tests
+fastapi          # Couche API HTTP
+uvicorn          # Serveur ASGI
+pydantic         # Validation des donnees
+sqlalchemy       # Acces a la base applicative SAGE_CAISSE_APP (Phase 4)
+httpx            # Requis par fastapi.testclient.TestClient (tests de l'API)
+python-multipart # Upload de fichiers (justificatifs, Phase 7)
+reportlab        # Generation de PDF (export operation, Phase 7)

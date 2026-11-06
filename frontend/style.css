@@ -1,0 +1,147 @@
+/* sage_caisse - Phase 6
+   Inspiré de l'esprit Odoo 19 (hr_expense) sans en copier le code :
+   barre supérieure, liste avec filtres à gauche, fiche en sections,
+   statuts colorés, notifications animées en bas à droite. */
+
+:root {
+  --couleur-fond: #f7f7f8;
+  --couleur-carte: #ffffff;
+  --couleur-bordure: #e2e2e6;
+  --couleur-texte: #2b2b33;
+  --couleur-texte-attenue: #6b6b76;
+  --couleur-primaire: #5b4ccb;
+  --couleur-primaire-hover: #4a3cb0;
+  --couleur-brouillon: #8a8a92;
+  --couleur-valide: #2a6fdb;
+  --couleur-comptabilise: #1f9d55;
+  --couleur-annule: #d8433f;
+  --rayon: 8px;
+  --ombre: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background: var(--couleur-fond);
+  color: var(--couleur-texte);
+  font-size: 14px;
+}
+
+/* --- Barre supérieure ------------------------------------------------- */
+.barre-haut {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 20px;
+  background: var(--couleur-carte);
+  border-bottom: 1px solid var(--couleur-bordure);
+  flex-wrap: wrap;
+}
+.barre-haut .titre { font-weight: 700; font-size: 16px; color: var(--couleur-primaire); }
+.barre-haut nav { display: flex; gap: 4px; }
+.barre-haut nav button {
+  background: none; border: none; padding: 6px 12px; border-radius: var(--rayon);
+  cursor: pointer; color: var(--couleur-texte-attenue); font-weight: 600;
+}
+.barre-haut nav button.actif { background: var(--couleur-primaire); color: white; }
+.barre-haut .droite { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+.barre-haut select { padding: 5px 8px; border-radius: var(--rayon); border: 1px solid var(--couleur-bordure); }
+
+.pastille-mode {
+  display: inline-flex; align-items: center; gap: 6px; font-size: 12px;
+  padding: 4px 10px; border-radius: 999px; cursor: pointer; user-select: none;
+  border: 1px solid var(--couleur-bordure);
+}
+.pastille-mode .point { width: 8px; height: 8px; border-radius: 50%; }
+.pastille-mode.lecture-seule .point { background: var(--couleur-annule); }
+.pastille-mode.ecriture .point { background: var(--couleur-comptabilise); }
+
+/* --- Conteneur principal ------------------------------------------------ */
+.conteneur { padding: 20px; max-width: 1200px; margin: 0 auto; }
+
+/* --- Tableau de bord --------------------------------------------------- */
+.grille-cartes { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin-bottom: 24px; }
+.carte {
+  background: var(--couleur-carte); border: 1px solid var(--couleur-bordure); border-radius: var(--rayon);
+  padding: 16px; box-shadow: var(--ombre);
+}
+.carte .valeur { font-size: 26px; font-weight: 700; }
+.carte .libelle { color: var(--couleur-texte-attenue); font-size: 13px; margin-top: 4px; }
+
+/* --- Barre d'action / filtres ------------------------------------------- */
+.barre-action { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
+.barre-action input, .barre-action select {
+  padding: 7px 10px; border-radius: var(--rayon); border: 1px solid var(--couleur-bordure); background: white;
+}
+.bouton {
+  padding: 8px 16px; border-radius: var(--rayon); border: none; cursor: pointer; font-weight: 600;
+  background: var(--couleur-primaire); color: white;
+}
+.bouton:hover { background: var(--couleur-primaire-hover); }
+.bouton.secondaire { background: white; color: var(--couleur-texte); border: 1px solid var(--couleur-bordure); }
+.bouton.danger { background: var(--couleur-annule); }
+.bouton.succes { background: var(--couleur-comptabilise); }
+.bouton:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* --- Liste des opérations ----------------------------------------------- */
+.groupe-titre { font-weight: 700; margin: 18px 0 6px; color: var(--couleur-texte-attenue); text-transform: uppercase; font-size: 12px; }
+table.liste { width: 100%; border-collapse: collapse; background: var(--couleur-carte); border-radius: var(--rayon); overflow: hidden; box-shadow: var(--ombre); }
+table.liste th, table.liste td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--couleur-bordure); }
+table.liste th { background: #fafafa; font-size: 12px; color: var(--couleur-texte-attenue); text-transform: uppercase; }
+table.liste tbody tr { cursor: pointer; }
+table.liste tbody tr:hover { background: #f4f3fb; }
+
+.badge-statut {
+  display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; color: white;
+}
+.badge-statut.BROUILLON { background: var(--couleur-brouillon); }
+.badge-statut.VALIDE { background: var(--couleur-valide); }
+.badge-statut.COMPTABILISE { background: var(--couleur-comptabilise); }
+.badge-statut.ANNULE { background: var(--couleur-annule); }
+
+/* --- Indicateur de progression du workflow ------------------------------ */
+.progression { display: flex; align-items: center; gap: 8px; margin: 10px 0 20px; }
+.progression .etape {
+  padding: 6px 14px; border-radius: 999px; font-size: 12px; font-weight: 700; background: #eceef3; color: var(--couleur-texte-attenue);
+}
+.progression .etape.atteinte { color: white; }
+.progression .etape.atteinte.BROUILLON { background: var(--couleur-brouillon); }
+.progression .etape.atteinte.VALIDE { background: var(--couleur-valide); }
+.progression .etape.atteinte.COMPTABILISE { background: var(--couleur-comptabilise); }
+.progression .fleche { color: var(--couleur-bordure); }
+
+/* --- Fiche opération (formulaire) --------------------------------------- */
+.fiche { background: var(--couleur-carte); border-radius: var(--rayon); box-shadow: var(--ombre); padding: 20px; }
+.section { margin-bottom: 20px; }
+.section h3 { font-size: 13px; text-transform: uppercase; color: var(--couleur-texte-attenue); margin: 0 0 10px; border-bottom: 1px solid var(--couleur-bordure); padding-bottom: 6px; }
+.ligne-champs { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+.champ label { display: block; font-size: 12px; color: var(--couleur-texte-attenue); margin-bottom: 4px; }
+.champ input, .champ select, .champ textarea {
+  width: 100%; padding: 8px 10px; border-radius: var(--rayon); border: 1px solid var(--couleur-bordure);
+}
+.barre-boutons { display: flex; gap: 8px; margin-top: 20px; flex-wrap: wrap; }
+
+/* --- Historique / validations ------------------------------------------- */
+.journal { margin-top: 20px; }
+.journal-ligne { padding: 8px 0; border-bottom: 1px dashed var(--couleur-bordure); font-size: 13px; }
+.journal-ligne .meta { color: var(--couleur-texte-attenue); font-size: 12px; }
+
+/* --- Notifications animées ------------------------------------------------ */
+.zone-toasts { position: fixed; bottom: 20px; right: 20px; display: flex; flex-direction: column; gap: 10px; z-index: 100; }
+.toast {
+  min-width: 260px; max-width: 360px; padding: 12px 16px; border-radius: var(--rayon); color: white;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.18);
+  animation: glisser-apparaitre 0.25s ease-out;
+}
+.toast.succes { background: var(--couleur-comptabilise); }
+.toast.erreur { background: var(--couleur-annule); }
+.toast.validation { background: #c77d13; }
+@keyframes glisser-apparaitre {
+  from { transform: translateX(40px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+.chargement { padding: 40px; text-align: center; color: var(--couleur-texte-attenue); }
+.message-vide { padding: 30px; text-align: center; color: var(--couleur-texte-attenue); }
