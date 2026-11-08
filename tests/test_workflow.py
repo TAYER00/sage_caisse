@@ -49,6 +49,34 @@ def test_user_ne_peut_pas_valider(contexte):
         service_operations.valider_operation(id_operation, contexte["id_user"])
 
 
+def test_manager_peut_valider_directement_une_annulee(contexte):
+    """Phase 10 : revalider une opération ANNULEE sans repasser par 'remettre en brouillon'."""
+    id_operation = _creer_depense(contexte, montant=100)
+    service_operations.annuler_operation(id_operation, contexte["id_user"])
+    resultat = service_operations.valider_operation(id_operation, contexte["id_manager"])
+    assert resultat["succes"] is True
+    operation = service_operations.lire_operation(id_operation)["donnees"]
+    assert operation["Statut"] == "VALIDE"
+    # Le solde doit refléter la validation, même en passant directement par ANNULE.
+    caisse = service_caisses.lire_caisse(contexte["id_caisse"])["donnees"]
+    assert caisse["Solde_Actuel"] == 400  # 500 - 100
+
+
+def test_user_ne_peut_pas_valider_une_annulee(contexte):
+    id_operation = _creer_depense(contexte)
+    service_operations.annuler_operation(id_operation, contexte["id_user"])
+    with pytest.raises(ErreurValidation, match="droits"):
+        service_operations.valider_operation(id_operation, contexte["id_user"])
+
+
+def test_valider_une_comptabilisee_est_refusee(contexte):
+    id_operation = _creer_depense(contexte)
+    service_operations.valider_operation(id_operation, contexte["id_manager"])
+    service_operations.comptabiliser_operation(id_operation, contexte["id_manager"])
+    with pytest.raises(ErreurValidation):
+        service_operations.valider_operation(id_operation, contexte["id_manager"])
+
+
 def test_double_validation_refusee(contexte):
     id_operation = _creer_depense(contexte)
     service_operations.valider_operation(id_operation, contexte["id_manager"])
@@ -141,6 +169,31 @@ def test_user_ne_peut_pas_remettre_en_brouillon(contexte):
     service_operations.valider_operation(id_operation, contexte["id_manager"])
     with pytest.raises(ErreurValidation, match="droits"):
         service_operations.remettre_en_brouillon(id_operation, contexte["id_user"])
+
+
+def test_manager_peut_remettre_une_annulee_en_brouillon(contexte):
+    """prmopt_3.txt : une opération ANNULEE doit pouvoir redevenir BROUILLON pour être corrigée."""
+    id_operation = _creer_depense(contexte)
+    service_operations.annuler_operation(id_operation, contexte["id_user"])
+    resultat = service_operations.remettre_en_brouillon(id_operation, contexte["id_manager"])
+    assert resultat["succes"] is True
+    operation = service_operations.lire_operation(id_operation)["donnees"]
+    assert operation["Statut"] == "BROUILLON"
+    # Redevenue modifiable par son créateur, comme depuis un VALIDE remis en brouillon.
+    service_operations.modifier_operation(id_operation, contexte["id_user"], Montant=150)
+
+
+def test_user_ne_peut_pas_remettre_une_annulee_en_brouillon(contexte):
+    id_operation = _creer_depense(contexte)
+    service_operations.annuler_operation(id_operation, contexte["id_user"])
+    with pytest.raises(ErreurValidation, match="droits"):
+        service_operations.remettre_en_brouillon(id_operation, contexte["id_user"])
+
+
+def test_remettre_en_brouillon_refuse_si_deja_brouillon(contexte):
+    id_operation = _creer_depense(contexte)
+    with pytest.raises(ErreurValidation):
+        service_operations.remettre_en_brouillon(id_operation, contexte["id_manager"])
 
 
 # --- Calcul du solde --------------------------------------------------------------

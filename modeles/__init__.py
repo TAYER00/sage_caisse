@@ -7,6 +7,8 @@ from .justificatif import JustificatifCaisse
 from .validation import ValidationCaisse
 from .historique import HistoriqueCaisse
 from .correspondance import CorrespondanceReglement
+from .tiers_sage import TiersSage
+from .collaborateur_sage import CollaborateurSage
 
 __all__ = [
     "Base",
@@ -18,4 +20,6 @@ __all__ = [
     "ValidationCaisse",
     "HistoriqueCaisse",
     "CorrespondanceReglement",
+    "TiersSage",
+    "CollaborateurSage",
 ]

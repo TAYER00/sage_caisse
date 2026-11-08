@@ -155,6 +155,68 @@ def lire_compte_general_sage(connexion, cg_num: str) -> dict | None:
     return lignes[0] if lignes else None
 
 
+def lister_caisses_sage(connexion) -> list[dict]:
+    """
+    Objectif : lire TOUTES les caisses réelles de Sage (F_CAISSE), jointes
+    à F_DEPOT pour résoudre la société réelle (DE_No -> DE_Intitule) -
+    utilisée par la synchronisation Phase 11 (voir
+    00_analyse/11_PHASE1_ANALYSE_SYNC_BIJOU.md). Contrairement à
+    lire_caisse_sage() (une seule caisse, par CA_No), cette fonction lit
+    tout F_CAISSE en une fois, dans le même esprit que apercu_caisses()
+    mais sans limite de lignes et avec le nom de société déjà résolu.
+
+    Retour : liste de dict - une entrée par caisse Sage réelle :
+        CA_No, CA_Intitule, DE_No, Societe (= F_DEPOT.DE_Intitule).
+
+    Erreurs possibles : ErreurConnexion si la lecture échoue côté SQL Server.
+
+    Exemple :
+        lister_caisses_sage(connexion)
+        # -> [{"CA_No": 1, "CA_Intitule": "Caisse 1 Bijou SA", "DE_No": 1, "Societe": "Bijou SA"}, ...]
+    """
+    return connexion.executer_lecture(
+        "SELECT ca.CA_No, ca.CA_Intitule, ca.DE_No, de.DE_Intitule AS Societe "
+        "FROM F_CAISSE ca JOIN F_DEPOT de ON de.DE_No = ca.DE_No "
+        "ORDER BY ca.CA_No"
+    )
+
+
+def lister_tiers_sage(connexion) -> list[dict]:
+    """
+    Objectif : lire TOUS les tiers réels de Sage (F_COMPTET) - utilisée
+    par la synchronisation Phase 12 (combobox "Bénéficiaire" du
+    formulaire d'opération, remplace la saisie libre d'un code).
+
+    Retour : liste de dict - CT_Num, CT_Intitule, CT_Type.
+
+    Erreurs possibles : ErreurConnexion si la lecture échoue côté SQL Server.
+
+    Exemple :
+        lister_tiers_sage(connexion)
+    """
+    return connexion.executer_lecture(
+        "SELECT CT_Num, CT_Intitule, CT_Type FROM F_COMPTET ORDER BY CT_Intitule"
+    )
+
+
+def lister_collaborateurs_sage(connexion) -> list[dict]:
+    """
+    Objectif : lire TOUS les collaborateurs réels de Sage
+    (F_COLLABORATEUR) - utilisée par la synchronisation Phase 12
+    (combobox "Responsable" du formulaire d'opération).
+
+    Retour : liste de dict - CO_No, CO_Nom, CO_Prenom, CO_Caissier.
+
+    Erreurs possibles : ErreurConnexion si la lecture échoue côté SQL Server.
+
+    Exemple :
+        lister_collaborateurs_sage(connexion)
+    """
+    return connexion.executer_lecture(
+        "SELECT CO_No, CO_Nom, CO_Prenom, CO_Caissier FROM F_COLLABORATEUR ORDER BY CO_Nom, CO_Prenom"
+    )
+
+
 def lire_collaborateur_sage(connexion, co_no: int) -> dict | None:
     """Lit un collaborateur Sage par CO_No, ou None si il n'existe pas."""
     if co_no is None:

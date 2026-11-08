@@ -1,0 +1,9 @@
+Améliorer la gestion des opérations existantes en ajoutant les fonctionnalités suivantes :
+
+Modification : permettre la modification de tous les champs d'une opération au statut BROUILLON.
+Remise en brouillon : permettre de remettre une opération ANNULÉE en BROUILLON via le bouton « Remettre en brouillon » et boutton << Annuler >>, afin de pouvoir la modifier à nouveau.
+Opération validée : interdire toute modification d'une opération au statut VALIDÉ, avec des champs en lecture seule.
+Suppression : permettre exclusivement aux utilisateurs ayant le rôle MANAGER de supprimer directement les opérations aux statuts BROUILLON ou ANNULÉ.
+Sécurité : appliquer toutes ces règles côté frontend et backend.
+
+Consigne : analyser le code existant, identifier les composants et services concernés, respecter l'architecture actuelle et implémenter cette amélioration sans impacter les fonctionnalités existantes. Ajouter les tests nécessaires pour vérifier les règles métier et les autorisations.

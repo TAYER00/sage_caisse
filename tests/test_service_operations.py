@@ -89,6 +89,74 @@ def test_modifier_operation_en_brouillon_fonctionne(contexte):
     assert operation["Observation"] == "Taxi + pourboire"
 
 
+def test_modifier_operation_tous_les_champs_en_brouillon(contexte):
+    """prmopt_3.txt : tous les champs doivent être modifiables tant que BROUILLON."""
+    autre_caisse = service_caisses.creer_caisse("CA-2", "Autre Caisse", "Bijou SA", solde_initial=0)["id"]
+    id_operation = service_operations.creer_operation(
+        "DEPENSE", contexte["id_caisse"], datetime.now(), 45, contexte["id_utilisateur"]
+    )["id"]
+
+    resultat = service_operations.modifier_operation(
+        id_operation, contexte["id_utilisateur"],
+        Id_Caisse=autre_caisse, Societe="Autre Société", Beneficiaire="C00123",
+        Responsable=contexte["id_utilisateur"], Compte_Financier="5310", Compte_Analytique="PROJ-A",
+        Devise="MAD",
+    )
+    assert resultat["succes"] is True
+    operation = service_operations.lire_operation(id_operation)["donnees"]
+    assert operation["Id_Caisse"] == autre_caisse
+    assert operation["Societe"] == "Autre Société"
+    assert operation["Devise"] == "MAD"
+
+
+def test_modifier_operation_refuse_caisse_inexistante(contexte):
+    id_operation = service_operations.creer_operation(
+        "DEPENSE", contexte["id_caisse"], datetime.now(), 45, contexte["id_utilisateur"]
+    )["id"]
+    with pytest.raises(ErreurValidation):
+        service_operations.modifier_operation(id_operation, contexte["id_utilisateur"], Id_Caisse=999)
+
+
+def test_modifier_operation_changement_type_impose_le_sens(contexte):
+    """Passer de DEPENSE à ALIMENTATION doit recalculer Sens_Solde automatiquement (même règle qu'à la création)."""
+    id_operation = service_operations.creer_operation(
+        "DEPENSE", contexte["id_caisse"], datetime.now(), 45, contexte["id_utilisateur"]
+    )["id"]
+    service_operations.modifier_operation(id_operation, contexte["id_utilisateur"], Type_Operation="ALIMENTATION")
+    operation = service_operations.lire_operation(id_operation)["donnees"]
+    assert operation["Type_Operation"] == "ALIMENTATION"
+    assert operation["Sens_Solde"] == "ENTREE"
+
+
+def test_modifier_operation_devenir_remboursement_exige_sens_explicite(contexte):
+    id_operation = service_operations.creer_operation(
+        "DEPENSE", contexte["id_caisse"], datetime.now(), 45, contexte["id_utilisateur"]
+    )["id"]
+    with pytest.raises(ErreurValidation):
+        service_operations.modifier_operation(id_operation, contexte["id_utilisateur"], Type_Operation="REMBOURSEMENT")
+
+    resultat = service_operations.modifier_operation(
+        id_operation, contexte["id_utilisateur"], Type_Operation="REMBOURSEMENT", Sens_Solde="ENTREE"
+    )
+    assert resultat["succes"] is True
+    operation = service_operations.lire_operation(id_operation)["donnees"]
+    assert operation["Sens_Solde"] == "ENTREE"
+
+
+def test_modifier_operation_annulee_fonctionne(contexte):
+    """Phase 10 : BROUILLON et ANNULE se comportent de façon identique - une ANNULE reste modifiable."""
+    id_operation = service_operations.creer_operation(
+        "DEPENSE", contexte["id_caisse"], datetime.now(), 45, contexte["id_utilisateur"]
+    )["id"]
+    service_operations.annuler_operation(id_operation, contexte["id_utilisateur"])
+
+    resultat = service_operations.modifier_operation(id_operation, contexte["id_utilisateur"], Montant=60)
+    assert resultat["succes"] is True
+    operation = service_operations.lire_operation(id_operation)["donnees"]
+    assert operation["Montant"] == 60
+    assert operation["Statut"] == "ANNULE"  # la modification seule ne change pas le statut
+
+
 def test_modifier_operation_validee_est_bloquee(contexte, session_app):
     from modeles.operation import OperationCaisse
 
@@ -105,14 +173,45 @@ def test_modifier_operation_validee_est_bloquee(contexte, session_app):
         service_operations.modifier_operation(id_operation, contexte["id_utilisateur"], Montant=99)
 
 
-def test_supprimer_operation_en_brouillon_fonctionne(contexte):
+def test_supprimer_operation_brouillon_par_manager_fonctionne(contexte):
+    """prmopt_3.txt : la suppression directe est réservée EXCLUSIVEMENT aux MANAGER."""
+    id_manager = service_utilisateurs.creer_utilisateur("manager_del", "x", "Manager Suppression", "MANAGER")["id"]
     id_operation = service_operations.creer_operation(
         "DEPENSE", contexte["id_caisse"], datetime.now(), 45, contexte["id_utilisateur"]
     )["id"]
-    resultat = service_operations.supprimer_operation(id_operation, contexte["id_utilisateur"], confirmer=True)
+    resultat = service_operations.supprimer_operation(id_operation, id_manager, confirmer=True)
     assert resultat["succes"] is True
     with pytest.raises(ErreurValidation):
         service_operations.lire_operation(id_operation)
+
+
+def test_supprimer_operation_refuse_si_pas_manager_meme_createur(contexte):
+    """Le créateur USER ne peut plus supprimer, même sa propre opération en brouillon."""
+    id_operation = service_operations.creer_operation(
+        "DEPENSE", contexte["id_caisse"], datetime.now(), 45, contexte["id_utilisateur"]
+    )["id"]
+    with pytest.raises(ErreurValidation, match="droits"):
+        service_operations.supprimer_operation(id_operation, contexte["id_utilisateur"], confirmer=True)
+
+
+def test_supprimer_operation_annulee_par_manager_fonctionne(contexte):
+    id_manager = service_utilisateurs.creer_utilisateur("manager_del2", "x", "Manager Suppression 2", "MANAGER")["id"]
+    id_operation = service_operations.creer_operation(
+        "DEPENSE", contexte["id_caisse"], datetime.now(), 45, contexte["id_utilisateur"]
+    )["id"]
+    service_operations.annuler_operation(id_operation, contexte["id_utilisateur"])
+    resultat = service_operations.supprimer_operation(id_operation, id_manager, confirmer=True)
+    assert resultat["succes"] is True
+
+
+def test_supprimer_operation_validee_est_refusee_meme_par_manager(contexte):
+    id_manager = service_utilisateurs.creer_utilisateur("manager_del3", "x", "Manager Suppression 3", "MANAGER")["id"]
+    id_operation = service_operations.creer_operation(
+        "DEPENSE", contexte["id_caisse"], datetime.now(), 45, contexte["id_utilisateur"]
+    )["id"]
+    service_operations.valider_operation(id_operation, id_manager)
+    with pytest.raises(ErreurValidation):
+        service_operations.supprimer_operation(id_operation, id_manager, confirmer=True)
 
 
 def test_supprimer_operation_refuse_sans_confirmation(contexte):

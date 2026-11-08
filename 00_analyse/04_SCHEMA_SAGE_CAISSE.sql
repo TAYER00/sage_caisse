@@ -64,7 +64,9 @@ CREATE TABLE CAISSES (
     Solde_Actuel             NUMERIC(18,2) NOT NULL DEFAULT 0,  -- CACHE recalcule par l'application, jamais modifie directement
     Statut                   VARCHAR(10)   NOT NULL DEFAULT 'ACTIF',
     Date_Creation            DATETIME      NOT NULL DEFAULT GETDATE(),
+    Derniere_Synchro_Sage    DATETIME      NULL,       -- Phase 11 : derniere synchro depuis BIJOU.F_CAISSE
     CONSTRAINT UQ_Caisses_Code UNIQUE (Code_Caisse),
+    CONSTRAINT UQ_Caisses_NumeroCaisseSage UNIQUE (Numero_Caisse_Sage),  -- Phase 11 : cle d'appariement sync (NULL autorises multiples)
     CONSTRAINT CK_Caisses_Statut CHECK (Statut IN ('ACTIF', 'INACTIF'))
 );
 GO

@@ -29,6 +29,8 @@ from services import (
     service_operations,
     service_parametres,
     service_pdf,
+    service_synchronisation_caisses,
+    service_synchronisation_referentiels,
     service_utilisateurs,
 )
 
@@ -38,7 +40,8 @@ from services import (
 # référence, il ne la relie pas dynamiquement au module d'origine).
 _MODULES_A_PATCHER = [
     connexion_app, service_caisses, service_operations, service_parametres,
-    service_utilisateurs, service_justificatifs, service_pdf,
+    service_utilisateurs, service_justificatifs, service_pdf, service_synchronisation_caisses,
+    service_synchronisation_referentiels,
 ]
 
 

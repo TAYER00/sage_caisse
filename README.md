@@ -1,6 +1,6 @@
 # sage_caisse — Application de gestion des caisses et dépenses (connectée à Sage 100)
 
-Phases 1 à 8 terminées : connexion Sage en lecture seule, base applicative `SAGE_CAISSE_APP`, backend FastAPI complet (CRUD + workflow + soldes + droits + justificatifs + PDF + authentification), frontend React (sans build), testé en conditions réelles, durci pour la production (CORS restreint, journalisation, variables d'environnement séparées). Historique complet dans `00_analyse/`.
+Phases 1 à 11 terminées : connexion Sage en lecture seule, base applicative `SAGE_CAISSE_APP`, backend FastAPI complet (CRUD + workflow + soldes + droits + justificatifs + PDF + authentification), frontend React (sans build) avec édition complète d'une opération en brouillon, testé en conditions réelles, durci pour la production (CORS restreint, journalisation, variables d'environnement séparées). Historique complet dans `00_analyse/`.
 
 ## Structure
 
@@ -18,15 +18,17 @@ services/
   service_parametres.py / service_caisses.py / service_operations.py
   service_justificatifs.py      Upload/telechargement/suppression de fichiers (Phase 7)
   service_pdf.py                 Export PDF d'une operation (Phase 7)
+  service_synchronisation_caisses.py   Sync caisses depuis BIJOU, lecture seule (Phase 11)
 gestion_erreurs/
   exceptions.py                 Exceptions + messages [SUCCES]/[ERREUR]/[VALIDATION]
+  journal.py                     Journalisation applicative (Phase 8)
 api/
-  main.py                       FastAPI (CRUD + workflow + configuration + auth + justificatifs + PDF)
+  main.py                       FastAPI (CRUD + workflow + configuration + auth + justificatifs + PDF + sync caisses)
 frontend/
   index.html / style.css / api.js / app.js   Interface React (UMD, sans build), ecran de connexion
-tests/                          79 tests (connexion Sage reelle + services + workflow + API + justificatifs + PDF + auth)
+tests/                          101 tests (connexion Sage reelle + services + workflow + API + justificatifs + PDF + auth + sync)
 stockage_justificatifs/         Fichiers uploades (non versionne, voir .gitignore)
-00_analyse/                     Documents de chaque phase (architecture, schema, workflow, frontend, tests d'integration)
+00_analyse/                     Documents de chaque phase (architecture, schema, workflow, frontend, tests d'integration, sync BIJOU)
 ```
 
 ## Lancer
@@ -57,6 +59,9 @@ python -m pytest tests/ -v
 - CORS restreint aux origines déclarées dans `ORIGINES_AUTORISEES` (`.env`) - jamais `"*"` en production.
 - Chaque requête et chaque erreur serveur est journalisée dans `logs/sage_caisse.log` (jamais le corps des requêtes - voir `gestion_erreurs/journal.py`).
 
+- Modification/suppression/validation d'une opération : autorisées en BROUILLON ou ANNULE (équivalents), verrouillées dès VALIDE/COMPTABILISE ; suppression directe réservée EXCLUSIVEMENT aux MANAGER.
+- Synchronisation des caisses depuis BIJOU (`POST /caisses/synchroniser-depuis-sage`, MANAGER uniquement) : lecture seule sur Sage, clé d'appariement `Numero_Caisse_Sage` (jamais le nom), idempotente, ne réécrase jamais `Nom_Caisse`/`Solde_Initial`/`Solde_Actuel`/`Statut` ni les opérations déjà liées.
+
 ## Reste à faire
 
-Remplacer la session `localStorage` actuelle par une vraie session serveur (JWT ou cookies) - explicitement reporté par l'utilisateur en fin de Phase 8, à reprendre si besoin. Voir `00_analyse/08_PHASE8_PRODUCTION.md`.
+Remplacer la session `localStorage` actuelle par une vraie session serveur (JWT ou cookies) - explicitement reporté par l'utilisateur en fin de Phase 8, à reprendre si besoin. Voir `00_analyse/08_PHASE8_PRODUCTION.md`, `00_analyse/09_PHASE9_MODIF_SUPPRESSION.md` et `00_analyse/12_PHASE11_SYNC_CAISSES_BIJOU.md`.

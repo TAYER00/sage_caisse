@@ -9,6 +9,13 @@ clé étrangère physique vers Sage (bases différentes, voir
 
 Solde_Actuel est un CACHE recalculé par le code métier (Phase 5) à partir
 des opérations - jamais modifié directement ici.
+
+Phase 11 (prompt_4.txt) : Numero_Caisse_Sage devient la clé d'appariement
+de la synchronisation depuis BIJOU (contrainte UNIQUE - SQL Server
+autorise plusieurs NULL sous une contrainte UNIQUE, donc une caisse
+100% applicative sans lien Sage reste possible). Derniere_Synchro_Sage
+trace la dernière fois que cette caisse a été mise à jour par
+service_synchronisation_caisses.py (voir 00_analyse/11_PHASE1_ANALYSE_SYNC_BIJOU.md).
 """
 
 from datetime import datetime
@@ -22,7 +29,10 @@ from modeles.base import Base
 
 class Caisse(Base):
     __tablename__ = "CAISSES"
-    __table_args__ = (UniqueConstraint("Code_Caisse", name="UQ_Caisses_Code"),)
+    __table_args__ = (
+        UniqueConstraint("Code_Caisse", name="UQ_Caisses_Code"),
+        UniqueConstraint("Numero_Caisse_Sage", name="UQ_Caisses_NumeroCaisseSage"),
+    )
 
     Id_Caisse: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     Code_Caisse: Mapped[str] = mapped_column(String(20), nullable=False)
@@ -36,3 +46,4 @@ class Caisse(Base):
     Solde_Actuel: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False, default=0)
     Statut: Mapped[str] = mapped_column(String(10), nullable=False, default="ACTIF")
     Date_Creation: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    Derniere_Synchro_Sage: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

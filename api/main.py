@@ -20,6 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 
 from config.configuration import ENVIRONNEMENT, ORIGINES_AUTORISEES, definir_mode_lecture_seule, mode_lecture_seule_actif
+from connexion.connexion_sage_lecture import ConnexionSageLectureSeule
 from gestion_erreurs.exceptions import ErreurConnexion, ErreurSageCaisse, ErreurSQL, ErreurValidation
 from gestion_erreurs.journal import obtenir_journal
 from services import (
@@ -28,6 +29,8 @@ from services import (
     service_operations,
     service_parametres,
     service_pdf,
+    service_synchronisation_caisses,
+    service_synchronisation_referentiels,
     service_utilisateurs,
 )
 from api.schemas import (
@@ -40,6 +43,7 @@ from api.schemas import (
     OperationModification,
     ParametreCreation,
     ReinitialisationMotDePasse,
+    SynchronisationDemandee,
     UtilisateurCreation,
 )
 
@@ -161,6 +165,34 @@ def lister_caisses(actives_seulement: bool = False):
 @app.get("/caisses/{id_caisse}")
 def lire_caisse(id_caisse: int):
     return service_caisses.lire_caisse(id_caisse)
+
+
+@app.post("/caisses/synchroniser-depuis-sage")
+def synchroniser_caisses_depuis_sage(donnees: SynchronisationDemandee):
+    """Phase 11 (prompt_4.txt) - lecture seule sur BIJOU, écriture uniquement dans SAGE_CAISSE_APP."""
+    connexion_sage = ConnexionSageLectureSeule()
+    connexion_sage.tester_connexion()
+    return service_synchronisation_caisses.synchroniser_caisses_depuis_sage(connexion_sage, donnees.utilisateur_id)
+
+
+# --- Référentiels Sage : tiers, collaborateurs (Phase 12) ---------------------
+
+@app.get("/referentiels/tiers")
+def lister_tiers():
+    return service_synchronisation_referentiels.lister_tiers()
+
+
+@app.get("/referentiels/collaborateurs")
+def lister_collaborateurs():
+    return service_synchronisation_referentiels.lister_collaborateurs()
+
+
+@app.post("/referentiels/synchroniser-depuis-sage")
+def synchroniser_referentiels_depuis_sage(donnees: SynchronisationDemandee):
+    """Phase 12 - lecture seule sur BIJOU (F_COMPTET, F_COLLABORATEUR), écriture uniquement dans SAGE_CAISSE_APP."""
+    connexion_sage = ConnexionSageLectureSeule()
+    connexion_sage.tester_connexion()
+    return service_synchronisation_referentiels.synchroniser_referentiels_depuis_sage(connexion_sage, donnees.utilisateur_id)
 
 
 # --- Opérations de caisse -----------------------------------------------------

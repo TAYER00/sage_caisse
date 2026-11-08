@@ -55,6 +55,8 @@ def test_creer_operation_via_api_rejette_remboursement_sans_sens(session_app):
 
 def test_cycle_complet_operation_via_api(session_app):
     client.post("/utilisateurs", json={"login": "test", "mot_de_passe": "x", "nom_complet": "Test"})
+    manager = client.post("/utilisateurs", json={"login": "manager", "mot_de_passe": "x", "nom_complet": "Manager", "role": "MANAGER"})
+    id_manager = manager.json()["id"]
     client.post("/caisses", json={"code_caisse": "CA-1", "nom_caisse": "Caisse 1", "societe": "Bijou SA"})
 
     creation = client.post("/operations", json={
@@ -75,5 +77,9 @@ def test_cycle_complet_operation_via_api(session_app):
     assert liste.status_code == 200
     assert len(liste.json()["resultats"]) == 1
 
-    suppression = client.delete(f"/operations/{id_operation}", params={"utilisateur_id": 1, "confirmer": True})
+    # Suppression directe réservée au MANAGER (prmopt_3.txt) - le créateur (USER) seul est refusé.
+    suppression_refusee = client.delete(f"/operations/{id_operation}", params={"utilisateur_id": 1, "confirmer": True})
+    assert suppression_refusee.status_code == 400
+
+    suppression = client.delete(f"/operations/{id_operation}", params={"utilisateur_id": id_manager, "confirmer": True})
     assert suppression.status_code == 200

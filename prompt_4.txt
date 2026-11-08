@@ -1,0 +1,132 @@
+Évolution du projet – Intégration et synchronisation des données avec Sage 100 (BIJOU)
+1. Contexte du projet
+
+Tu es un ingénieur senior en développement informatique, spécialisé en Python, bases de données et intégration avec Sage 100.
+
+Notre projet est une application Python de gestion de caisse (alimentation et dépenses), connectée à la base de données BIJOU, qui correspond à la base réelle de Sage 100.
+
+L'objectif est de proposer aux employés une application externe avec une interface moderne, ergonomique et performante pour faciliter la gestion quotidienne des caisses, tout en conservant Sage 100 comme système de référence pour les données comptables.
+
+2. Objectif principal
+
+Je souhaite faire évoluer l'architecture actuelle afin que l'application SAGE_CAISSE_APP puisse exploiter les données initiales déjà présentes dans la base BIJOU.
+
+L'idée est de conserver les données existantes dans SAGE_CAISSE_APP et de compléter cette base avec les données de référence récupérées depuis BIJOU.
+
+Cela permettra de créer une correspondance fiable entre les deux bases de données et de travailler avec les véritables informations des caisses issues de Sage 100.
+
+3. Première étape : initialisation des données de caisse dans BIJOU
+
+Je préfère utiliser des requêtes SQL explicites pour gérer les données relatives aux caisses dans BIJOU.
+
+Le travail demandé :
+
+en se basant sur la sage_caisse\00_analyse\RAPPORT_CORRESPONDANCE_SAGE_CAISSE_APP_BIJOU.md
+Analyser les tables de BIJOU liées à la gestion des caisses.
+Identifier les structures, les colonnes obligatoires, les clés primaires et les relations entre les tables.
+Identifier les informations nécessaires à la création et à la configuration des caisses.
+Préparer les requêtes SQL nécessaires pour créer ou alimenter les données de caisse dans BIJOU, avec toutes les informations requises.
+Vérifier la cohérence des données et respecter impérativement les contraintes de Sage 100.
+
+Important : ne pas exécuter de requêtes de modification sur BIJOU sans avoir préalablement identifié et validé leur fonctionnement et leur impact. Ne jamais inventer de structure de table ou de colonne.
+important : privilégier une synchronisation basée sur les identifiants réels de Sage 100 (clés de référence BIJOU), plutôt que sur les noms des caisses. C'est essentiel pour éviter les doublons et garantir une correspondance stable entre les deux bases.
+4. Deuxième étape : synchronisation initiale de BIJOU vers SAGE_CAISSE_APP
+
+Faire évoluer SAGE_CAISSE_APP pour qu'elle puisse lire et récupérer les données initiales depuis BIJOU.
+
+Le mécanisme doit permettre de :
+
+Lire les informations réelles des caisses depuis BIJOU.
+Récupérer les données nécessaires à leur exploitation dans l'application.
+Enregistrer ces informations dans les tables correspondantes de SAGE_CAISSE_APP.
+Conserver les données métier déjà présentes dans SAGE_CAISSE_APP.
+Ajouter les nouvelles informations provenant de BIJOU sans écraser les données locales existantes.
+Établir une correspondance entre chaque caisse locale et sa caisse d'origine dans BIJOU.
+
+Prévoir notamment :
+
+Un identifiant de référence BIJOU dans SAGE_CAISSE_APP.
+Une stratégie de détection des doublons.
+Une synchronisation répétable sans créer plusieurs fois les mêmes caisses.
+Une gestion des mises à jour des données de référence.
+Une traçabilité des synchronisations et des éventuelles erreurs.
+
+L'objectif est que SAGE_CAISSE_APP utilise les véritables données de référence de Sage 100 tout en conservant ses propres données complémentaires nécessaires au fonctionnement de l'application.
+
+5. Règle fondamentale : séparation entre les données de référence et les opérations financières
+
+Il est essentiel de distinguer les deux responsabilités des bases de données.
+
+BIJOU (Sage 100) :
+
+Fournit les données initiales et les informations de référence des caisses.
+Constitue la source des données réelles de Sage 100.
+
+SAGE_CAISSE_APP :
+
+Gère les opérations de caisse créées par les employés.
+Gère les dépenses, alimentations et autres opérations.
+Gère les statuts des opérations : BROUILLON, VALIDÉ, ANNULÉ.
+Conserve les données complémentaires propres à l'application.
+Règle impérative concernant les opérations
+
+Pour cette première phase :
+
+Toute nouvelle opération est enregistrée uniquement dans SAGE_CAISSE_APP.
+Aucune modification ne doit être effectuée dans la base BIJOU lors de la création, modification, validation ou annulation d'une opération.
+Les opérations financières restent exclusivement gérées dans SAGE_CAISSE_APP.
+La synchronisation des opérations réelles avec Sage 100 constitue une phase ultérieure du projet.
+6. Organisation du projet en phases
+
+Respecter impérativement cet ordre de réalisation :
+
+Phase 1 – Analyse
+
+Analyser l'architecture existante.
+Identifier les tables de caisse dans les deux bases.
+Comprendre les relations et les contraintes de Sage 100.
+Identifier les adaptations nécessaires.
+
+Phase 2 – Initialisation des données
+
+Préparer les requêtes SQL nécessaires pour les données de référence dans BIJOU.
+Vérifier et valider les structures et les requêtes avant toute exécution.
+
+Phase 3 – Synchronisation initiale
+
+Développer la lecture des données depuis BIJOU.
+Alimenter SAGE_CAISSE_APP avec les données récupérées.
+Mettre en place les correspondances entre les deux bases.
+Garantir l'absence de doublons et la conservation des données locales.
+
+Phase 4 – Adaptation de l'application
+
+Adapter les services, repositories, modèles et interfaces concernés.
+Utiliser les données réelles des caisses provenant de BIJOU.
+Préserver toutes les fonctionnalités existantes de gestion des opérations.
+
+Phase 5 – Synchronisation future des opérations Cette phase est volontairement exclue de l'implémentation actuelle.
+
+Elle sera étudiée ultérieurement pour permettre la transmission des opérations financières validées vers Sage 100, avec les mécanismes nécessaires de traçabilité, de sécurité et de gestion des annulations.
+
+7. Consignes de développement
+Analyser le code existant avant toute modification.
+Respecter l'architecture et les conventions actuelles du projet.
+Ne pas supprimer les données existantes de SAGE_CAISSE_APP.
+Ne pas modifier les données de BIJOU pendant les traitements des opérations.
+Séparer clairement les services de lecture BIJOU et les services de gestion des opérations locales.
+Prévoir une gestion sécurisée des connexions aux deux bases.
+Ne pas effectuer de modifications inutiles dans les tables Sage 100.
+Ajouter les tests nécessaires pour vérifier la synchronisation initiale et la non-régression.
+8. Résultat attendu
+
+À la fin de cette phase, je souhaite disposer d'une application SAGE_CAISSE_APP capable de :
+
+Exploiter les véritables données des caisses provenant de BIJOU.
+Conserver ses propres données et fonctionnalités.
+Établir une relation fiable entre les caisses des deux bases.
+Synchroniser les données initiales sans doublons ni perte de données.
+Gérer les opérations de caisse indépendamment de Sage 100.
+Préparer une architecture évolutive permettant d'intégrer ultérieurement la synchronisation des opérations financières.
+
+Avant de commencer le développement, présente-moi ton analyse de l'architecture existante, les tables concernées, les relations identifiées et le plan d'implémentation. Ne commence aucune modification de données dans BIJOU sans validation préalable.

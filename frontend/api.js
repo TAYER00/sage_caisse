@@ -57,6 +57,12 @@ export const api = {
   lireCaisse: (id) => appeler("GET", `/caisses/${id}`),
   creerCaisse: (donnees) => appeler("POST", "/caisses", donnees),
   recalculerSolde: (id) => appeler("POST", `/caisses/${id}/recalculer-solde`),
+  synchroniserCaissesDepuisSage: (utilisateurId) => appeler("POST", "/caisses/synchroniser-depuis-sage", { utilisateur_id: utilisateurId }),
+
+  // Référentiels Sage : tiers, collaborateurs (Phase 12)
+  listerTiers: () => appeler("GET", "/referentiels/tiers"),
+  listerCollaborateurs: () => appeler("GET", "/referentiels/collaborateurs"),
+  synchroniserReferentielsDepuisSage: (utilisateurId) => appeler("POST", "/referentiels/synchroniser-depuis-sage", { utilisateur_id: utilisateurId }),
 
   // Opérations
   listerOperations: (filtres) => {

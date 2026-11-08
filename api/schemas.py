@@ -63,23 +63,39 @@ class OperationCreation(BaseModel):
 
 
 class OperationModification(BaseModel):
-    """Seuls les champs fournis sont modifiés (voir service_operations.modifier_operation)."""
+    """
+    Seuls les champs fournis sont modifiés (voir
+    service_operations.modifier_operation) - Phase 9 (prmopt_3.txt) :
+    TOUS les champs métier d'une opération sont désormais modifiables
+    (plus seulement un sous-ensemble), mais toujours uniquement tant que
+    l'opération est en BROUILLON (vérifié côté service).
+    """
 
     utilisateur_id: int
+    type_operation: Optional[Literal["ALIMENTATION", "DEPENSE", "REMBOURSEMENT"]] = None
+    id_caisse: Optional[int] = None
+    date_operation: Optional[datetime] = None
     montant: Optional[float] = Field(default=None, gt=0)
+    sens_solde: Optional[Literal["ENTREE", "SORTIE"]] = None
+    id_motif: Optional[int] = None
+    societe: Optional[str] = Field(default=None, max_length=50)
     projet: Optional[str] = Field(default=None, max_length=100)
     observation: Optional[str] = Field(default=None, max_length=500)
     beneficiaire: Optional[str] = Field(default=None, max_length=17)
     responsable: Optional[int] = None
     compte_financier: Optional[str] = Field(default=None, max_length=13)
     compte_analytique: Optional[str] = Field(default=None, max_length=20)
+    devise: Optional[str] = Field(default=None, max_length=3)
 
     def vers_champs_sql(self) -> dict:
         """Convertit vers les noms de colonnes réels (Montant, Projet...), en ignorant les champs non fournis (et utilisateur_id, passé séparément)."""
         correspondance = {
-            "montant": "Montant", "projet": "Projet", "observation": "Observation",
+            "type_operation": "Type_Operation", "id_caisse": "Id_Caisse", "date_operation": "Date_Operation",
+            "montant": "Montant", "sens_solde": "Sens_Solde", "id_motif": "Id_Motif", "societe": "Societe",
+            "projet": "Projet", "observation": "Observation",
             "beneficiaire": "Beneficiaire", "responsable": "Responsable",
             "compte_financier": "Compte_Financier", "compte_analytique": "Compte_Analytique",
+            "devise": "Devise",
         }
         return {
             correspondance[champ]: valeur
@@ -110,3 +126,9 @@ class ConnexionUtilisateur(BaseModel):
 
     login: str = Field(min_length=1)
     mot_de_passe: str = Field(min_length=1)
+
+
+class SynchronisationDemandee(BaseModel):
+    """Phase 11/12 : déclenche une synchronisation depuis BIJOU (MANAGER uniquement)."""
+
+    utilisateur_id: int

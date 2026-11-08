@@ -2,17 +2,24 @@
 Service métier "Opération de caisse" - CRUD de base (Phase 4) + workflow
 complet, historique et calcul des soldes (Phase 5).
 
-Règles de droits et de transitions : voir
-00_analyse/05_PHASE5_WORKFLOW.md. Rappel des règles absolues du prompt :
-    - Une opération VALIDE ou COMPTABILISE ne peut plus être modifiée ni
-      supprimée directement (modifier_operation()/supprimer_operation()
-      restent réservées au BROUILLON).
+Règles de droits et de transitions : voir 00_analyse/05_PHASE5_WORKFLOW.md,
+00_analyse/09_PHASE9_MODIF_SUPPRESSION.md et 00_analyse/10_PHASE10_ANNULE_EQUIVALENT_BROUILLON.md.
+Rappel des règles absolues (Phase 10 - BROUILLON et ANNULE équivalents) :
+    - Une opération en BROUILLON ou ANNULE (STATUTS_MODIFIABLES) peut être
+      MODIFIÉE (tous champs), SUPPRIMÉE (réservé MANAGER) ou VALIDÉE
+      directement (réservé MANAGER).
+    - Une opération VALIDE est verrouillée (lecture seule, non
+      supprimable) - sa seule porte de sortie est "remettre en brouillon",
+      réservée au MANAGER.
+    - Une opération COMPTABILISE reste strictement figée (aucune des
+      actions ci-dessus).
     - Jamais de [SUCCES] avant une relecture de contrôle confirmant la
       persistance réelle (règle reprise de sage_to_shopify).
     - Jamais de double validation/comptabilisation silencieuse - toute
       transition déjà faite est explicitement refusée.
 """
 
+import shutil
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -28,19 +35,20 @@ from gestion_erreurs.exceptions import (
 )
 from modeles.caisse import Caisse
 from modeles.historique import HistoriqueCaisse
+from modeles.justificatif import JustificatifCaisse
 from modeles.operation import OperationCaisse
 from modeles.utilisateur import Utilisateur
 from modeles.validation import ValidationCaisse
 from services import droits, service_caisses
+from services.service_justificatifs import DOSSIER_STOCKAGE as DOSSIER_STOCKAGE_JUSTIFICATIFS
 
 TYPES_VALIDES = ("ALIMENTATION", "DEPENSE", "REMBOURSEMENT")
 SENS_IMPOSE = {"ALIMENTATION": "ENTREE", "DEPENSE": "SORTIE"}  # REMBOURSEMENT : choisi explicitement
 
-CHAMPS_MODIFIABLES_VERS_COLONNE = {
-    "Montant": "Montant", "Projet": "Projet", "Observation": "Observation",
-    "Beneficiaire": "Beneficiaire", "Responsable": "Responsable",
-    "Compte_Financier": "Compte_Financier", "Compte_Analytique": "Compte_Analytique",
-}
+# Phase 10 : BROUILLON et ANNULE se comportent de façon identique - modifiables,
+# supprimables, et validables directement. Seul VALIDE est verrouillé (lecture
+# seule), avec comme unique porte de sortie "remettre en brouillon" (MANAGER).
+STATUTS_MODIFIABLES = ("BROUILLON", "ANNULE")
 
 
 def _ecrire_historique(session, id_operation: int, champ: str, ancienne_valeur, nouvelle_valeur, utilisateur: int) -> None:
@@ -261,23 +269,31 @@ def lister_operations(
 
 def modifier_operation(id_operation: int, utilisateur_id: int, **champs) -> dict:
     """
-    Objectif : modifier les champs d'une opération - UNIQUEMENT si elle
-    est encore en BROUILLON (règle du prompt : blocage des modifications
-    sensibles dès que l'opération est validée), et uniquement par son
-    créateur ou un MANAGER.
+    Objectif : modifier N'IMPORTE QUEL champ métier d'une opération -
+    UNIQUEMENT si elle est en BROUILLON ou ANNULE (règle Phase 10 : ces
+    deux statuts se comportent de façon identique - modifiables,
+    supprimables, validables directement ; VALIDE/COMPTABILISE restent en
+    lecture seule), et uniquement par son créateur ou un MANAGER.
 
     Parametres :
         id_operation (int) : opération à modifier.
         utilisateur_id (int) : utilisateur qui demande la modification -
             tracé dans l'historique.
-        **champs : champs à modifier (ex: Montant=50, Projet="Autre projet").
-            Seuls les champs explicitement fournis sont modifiés (même
-            principe que sage_to_shopify : jamais de valeur par défaut
-            écrasant un champ non transmis). Chaque champ réellement
-            modifié est tracé dans HISTORIQUE_CAISSE.
+        **champs : champs à modifier (ex: Montant=50, Projet="Autre projet",
+            Type_Operation="REMBOURSEMENT", Sens_Solde="ENTREE",
+            Id_Caisse=2...). Seuls les champs explicitement fournis sont
+            modifiés (même principe que sage_to_shopify : jamais de valeur
+            par défaut écrasant un champ non transmis). Chaque champ
+            réellement modifié est tracé dans HISTORIQUE_CAISSE.
+
+            Cas particulier Type_Operation/Sens_Solde : mêmes règles qu'à
+            la création (voir creer_operation) - le sens est imposé pour
+            ALIMENTATION/DEPENSE (toute valeur fournie est ignorée), et
+            doit être fourni explicitement si le type devient
+            REMBOURSEMENT (jamais déduit automatiquement).
 
     Erreurs possibles : ErreurValidation (opération introuvable, pas en
-    brouillon, montant invalide, droits insuffisants).
+    brouillon, montant/caisse/type invalide, droits insuffisants).
 
     Exemple :
         modifier_operation(1, utilisateur_id=2, Montant=52.30, Observation="Taxi + pourboire")
@@ -287,6 +303,10 @@ def modifier_operation(id_operation: int, utilisateur_id: int, **champs) -> dict
         raise ErreurValidation("[VALIDATION] Aucune donnée à modifier n'a été fournie.")
     if "Montant" in champs and (champs["Montant"] is None or champs["Montant"] <= 0):
         raise ErreurValidation("[VALIDATION] Le montant doit être supérieur à zéro.")
+    if "Id_Caisse" in champs and champs["Id_Caisse"] is None:
+        raise ErreurValidation("[VALIDATION] Veuillez sélectionner une caisse.")
+    if "Date_Operation" in champs and champs["Date_Operation"] is None:
+        raise ErreurValidation("[VALIDATION] La date de l'opération est obligatoire.")
 
     session = obtenir_session()
     try:
@@ -294,12 +314,33 @@ def modifier_operation(id_operation: int, utilisateur_id: int, **champs) -> dict
         operation = session.get(OperationCaisse, id_operation)
         if operation is None:
             raise ErreurValidation(f"[VALIDATION] L'opération {id_operation} n'existe pas.")
-        if operation.Statut != "BROUILLON":
+        if operation.Statut not in STATUTS_MODIFIABLES:
             raise ErreurValidation(
                 f"[VALIDATION] Cette opération est '{operation.Statut}' - seule une opération "
-                f"en BROUILLON peut être modifiée."
+                f"en BROUILLON ou ANNULE peut être modifiée."
             )
         droits.exiger_createur_ou_manager(utilisateur, operation.Cree_Par)
+
+        if "Id_Caisse" in champs and session.get(Caisse, champs["Id_Caisse"]) is None:
+            raise ErreurValidation(f"[VALIDATION] La caisse {champs['Id_Caisse']} n'existe pas.")
+
+        if "Type_Operation" in champs or "Sens_Solde" in champs:
+            type_final = champs.get("Type_Operation", operation.Type_Operation)
+            if type_final not in TYPES_VALIDES:
+                raise ErreurValidation(f"[VALIDATION] Type d'opération invalide : {type_final}. Attendu : {TYPES_VALIDES}.")
+            if type_final in SENS_IMPOSE:
+                champs["Sens_Solde"] = SENS_IMPOSE[type_final]
+            else:  # REMBOURSEMENT
+                devient_remboursement = champs.get("Type_Operation") == "REMBOURSEMENT" and operation.Type_Operation != "REMBOURSEMENT"
+                sens_fourni = champs.get("Sens_Solde")
+                if devient_remboursement and sens_fourni not in ("ENTREE", "SORTIE"):
+                    raise ErreurValidation(
+                        "[VALIDATION] Pour un remboursement, vous devez indiquer explicitement "
+                        "si cela augmente (ENTREE) ou diminue (SORTIE) le solde de la caisse "
+                        "- ce sens n'est jamais déduit automatiquement."
+                    )
+                champs["Sens_Solde"] = sens_fourni if sens_fourni in ("ENTREE", "SORTIE") else operation.Sens_Solde
+            champs["Type_Operation"] = type_final
 
         anciennes_valeurs = {champ: getattr(operation, champ) for champ in champs}
         for champ, valeur in champs.items():
@@ -330,18 +371,27 @@ def modifier_operation(id_operation: int, utilisateur_id: int, **champs) -> dict
 
 def supprimer_operation(id_operation: int, utilisateur_id: int, confirmer: bool = False) -> dict:
     """
-    Objectif : supprimer une opération - UNIQUEMENT si elle est encore en
-    BROUILLON (règle du prompt : "Possibilité d'annuler ou supprimer selon
-    les règles de sécurité", limité ici au brouillon pour rester prudent),
-    et uniquement par son créateur ou un MANAGER.
+    Objectif : supprimer directement une opération en BROUILLON ou ANNULE
+    - réservé EXCLUSIVEMENT aux MANAGER (règle explicite : contrairement à
+    la modification ou à l'annulation, le créateur seul ne peut pas
+    supprimer, même sa propre opération).
 
     Parametres : confirmer (bool) doit valoir True.
 
     Erreurs possibles : ErreurValidation (non confirmé, introuvable, pas
-    en brouillon, droits insuffisants).
+    en brouillon/annulée, droits insuffisants - rôle autre que MANAGER).
+
+    Note technique : les tables HISTORIQUE_CAISSE/VALIDATIONS_CAISSE/
+    JUSTIFICATIFS_CAISSE référencent l'opération par clé étrangère SANS
+    suppression en cascade au niveau SQL Server - leurs lignes (et les
+    fichiers justificatifs sur disque) sont donc purgées explicitement ici
+    avant de supprimer l'opération, sinon SQL Server refuse le DELETE
+    (violation de contrainte). Trouvé en testant réellement contre la
+    vraie base (invisible avec SQLite en mémoire, qui n'impose pas les
+    clés étrangères par défaut).
 
     Exemple :
-        supprimer_operation(1, utilisateur_id=2, confirmer=True)
+        supprimer_operation(1, utilisateur_id=1, confirmer=True)
     """
     droits.verifier_ecriture_autorisee()
     if not confirmer:
@@ -353,16 +403,23 @@ def supprimer_operation(id_operation: int, utilisateur_id: int, confirmer: bool 
         operation = session.get(OperationCaisse, id_operation)
         if operation is None:
             raise ErreurValidation(f"[VALIDATION] L'opération {id_operation} n'existe pas.")
-        if operation.Statut != "BROUILLON":
+        if operation.Statut not in STATUTS_MODIFIABLES:
             raise ErreurValidation(
                 f"[VALIDATION] Cette opération est '{operation.Statut}' - seule une opération "
-                f"en BROUILLON peut être supprimée. Utilisez 'Annuler' sinon."
+                f"en BROUILLON ou ANNULE peut être supprimée."
             )
-        droits.exiger_createur_ou_manager(utilisateur, operation.Cree_Par)
+        droits.exiger_role(utilisateur, ("MANAGER",))
 
         reference = operation.Reference
+        session.query(HistoriqueCaisse).filter(HistoriqueCaisse.Id_Operation == id_operation).delete()
+        session.query(ValidationCaisse).filter(ValidationCaisse.Id_Operation == id_operation).delete()
+        session.query(JustificatifCaisse).filter(JustificatifCaisse.Id_Operation == id_operation).delete()
         session.delete(operation)
         session.commit()
+
+        dossier_justificatifs = DOSSIER_STOCKAGE_JUSTIFICATIFS / str(id_operation)
+        shutil.rmtree(dossier_justificatifs, ignore_errors=True)
+
         return {"succes": True, "message": message_succes(f"Opération '{reference}' supprimée avec succès.")}
     finally:
         session.close()
@@ -372,7 +429,9 @@ def supprimer_operation(id_operation: int, utilisateur_id: int, confirmer: bool 
 
 def valider_operation(id_operation: int, utilisateur_id: int, commentaire: str = None) -> dict:
     """
-    Objectif : valider une opération en BROUILLON (passage à VALIDE).
+    Objectif : valider une opération en BROUILLON OU ANNULE (passage
+    direct à VALIDE - règle Phase 10, pas besoin de repasser par
+    "remettre en brouillon" pour revalider une opération annulée).
     Réservé aux MANAGER (voir 00_analyse/05_PHASE5_WORKFLOW.md).
 
     Erreurs possibles : ErreurValidation (introuvable, déjà validée/autre
@@ -392,7 +451,7 @@ def valider_operation(id_operation: int, utilisateur_id: int, commentaire: str =
             raise ErreurValidation(f"[VALIDATION] L'opération {id_operation} n'existe pas.")
         if operation.Statut == "VALIDE":
             raise ErreurValidation("[VALIDATION] Cette opération a déjà été validée.")
-        if operation.Statut != "BROUILLON":
+        if operation.Statut not in STATUTS_MODIFIABLES:
             raise ErreurValidation(f"[VALIDATION] Une opération '{operation.Statut}' ne peut pas être validée.")
 
         operation.Statut = "VALIDE"
@@ -524,11 +583,13 @@ def comptabiliser_operation(id_operation: int, utilisateur_id: int, reference_co
 
 def remettre_en_brouillon(id_operation: int, utilisateur_id: int, commentaire: str = None) -> dict:
     """
-    Objectif : repasser une opération VALIDE en BROUILLON. Réservé aux
-    MANAGER (règle explicite du prompt : "uniquement si autorisé").
+    Objectif : repasser une opération VALIDE ou ANNULE en BROUILLON (pour
+    l'ANNULE : afin de pouvoir la corriger puis la revalider, plutôt que
+    de la recréer). Réservé aux MANAGER (règle explicite du prompt :
+    "uniquement si autorisé").
 
-    Erreurs possibles : ErreurValidation (introuvable, pas VALIDE, droits
-    insuffisants).
+    Erreurs possibles : ErreurValidation (introuvable, pas VALIDE/ANNULE,
+    droits insuffisants).
 
     Exemple :
         remettre_en_brouillon(1, utilisateur_id=1, commentaire="Erreur de montant à corriger.")
@@ -542,17 +603,21 @@ def remettre_en_brouillon(id_operation: int, utilisateur_id: int, commentaire: s
         operation = session.get(OperationCaisse, id_operation)
         if operation is None:
             raise ErreurValidation(f"[VALIDATION] L'opération {id_operation} n'existe pas.")
-        if operation.Statut != "VALIDE":
+        if operation.Statut not in ("VALIDE", "ANNULE"):
             raise ErreurValidation(
-                f"[VALIDATION] Seule une opération VALIDE peut être remise en brouillon (statut actuel : '{operation.Statut}')."
+                f"[VALIDATION] Seule une opération VALIDE ou ANNULE peut être remise en brouillon (statut actuel : '{operation.Statut}')."
             )
 
+        statut_precedent = operation.Statut
         operation.Statut = "BROUILLON"
         operation.Valide_Par = None
         operation.Date_Validation = None
         _ecrire_validation(session, id_operation, "REMISE_BROUILLON", utilisateur_id, commentaire)
         session.flush()
-        service_caisses.recalculer_solde(operation.Id_Caisse, session=session)
+        if statut_precedent == "VALIDE":
+            # L'opération sortait du calcul du solde - recalcul nécessaire (une
+            # ANNULE n'y était déjà plus comptée, inutile de recalculer pour rien).
+            service_caisses.recalculer_solde(operation.Id_Caisse, session=session)
         session.commit()
 
         confirmation = session.get(OperationCaisse, id_operation)

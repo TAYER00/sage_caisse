@@ -173,9 +173,10 @@ function Dashboard({ caisses, operations, onNouvelleOperation }) {
 
 // --- Liste des opérations -------------------------------------------------------
 
-function ListeOperations({ operations, caisses, utilisateurs, filtres, onFiltres, groupePar, onGroupePar, onOuvrir, onNouvelleOperation }) {
+function ListeOperations({ operations, caisses, utilisateurs, collaborateurs, filtres, onFiltres, groupePar, onGroupePar, onOuvrir, onNouvelleOperation }) {
   const nomCaisse = (id) => (caisses.find((c) => c.Id_Caisse === id) || {}).Nom_Caisse || `Caisse ${id}`;
-  const nomUtilisateur = (id) => (utilisateurs.find((u) => u.Id_Utilisateur === id) || {}).Nom_Complet || (id ? `#${id}` : "—");
+  // Responsable = un collaborateur Sage (F_COLLABORATEUR.CO_No), PAS un utilisateur de l'application.
+  const nomResponsable = (id) => (collaborateurs.find((c) => c.CO_No === id) || {}).Nom_Complet || (id ? `#${id}` : "—");
 
   let groupes = { "Toutes les opérations": operations };
   if (groupePar === "caisse") {
@@ -267,7 +268,7 @@ function ListeOperations({ operations, caisses, utilisateurs, filtres, onFiltres
                 h("td", null, nomCaisse(o.Id_Caisse)),
                 h("td", null, o.Type_Operation),
                 h("td", null, o.Projet || "—"),
-                h("td", null, nomUtilisateur(o.Responsable)),
+                h("td", null, nomResponsable(o.Responsable)),
                 h("td", null, `${Number(o.Montant).toFixed(2)} ${o.Devise}`),
                 h("td", null, h("span", { className: `badge-statut ${o.Statut}` }, LIBELLES_STATUT[o.Statut]))
               )
@@ -303,7 +304,7 @@ function ProgressionWorkflow({ statut }) {
 
 // --- Formulaire de nouvelle opération ---------------------------------------------
 
-function FormulaireOperation({ caisses, parametres, utilisateurCourant, onCree, onAnnulerSaisie, toasts }) {
+function FormulaireOperation({ caisses, parametres, tiers, collaborateurs, utilisateurCourant, onCree, onAnnulerSaisie, toasts }) {
   const [valeurs, setValeurs] = useState({
     type_operation: "DEPENSE", id_caisse: "", date_operation: new Date().toISOString().slice(0, 16),
     montant: "", sens_solde: "", id_motif: "", beneficiaire: "", responsable: "", societe: "",
@@ -460,14 +461,24 @@ function FormulaireOperation({ caisses, parametres, utilisateurCourant, onCree, 
         h(
           "div",
           { className: "champ" },
-          h("label", null, "Bénéficiaire (code tiers Sage)"),
-          h("input", { value: valeurs.beneficiaire, onChange: maj("beneficiaire") })
+          h("label", null, "Bénéficiaire"),
+          h(
+            "select",
+            { value: valeurs.beneficiaire, onChange: maj("beneficiaire") },
+            h("option", { value: "" }, "— Aucun —"),
+            tiers.map((t) => h("option", { key: t.CT_Num, value: t.CT_Num }, t.Intitule))
+          )
         ),
         h(
           "div",
           { className: "champ" },
-          h("label", null, "Responsable (code collaborateur Sage)"),
-          h("input", { type: "number", value: valeurs.responsable, onChange: maj("responsable") })
+          h("label", null, "Responsable"),
+          h(
+            "select",
+            { value: valeurs.responsable, onChange: maj("responsable") },
+            h("option", { value: "" }, "— Aucun —"),
+            collaborateurs.map((c) => h("option", { key: c.CO_No, value: c.CO_No }, c.Nom_Complet))
+          )
         ),
         h(
           "div",
@@ -499,12 +510,14 @@ function FormulaireOperation({ caisses, parametres, utilisateurCourant, onCree, 
 
 // --- Fiche détaillée d'une opération (workflow) -----------------------------------
 
-function FicheOperation({ idOperation, utilisateurCourant, caisses, utilisateurs, onRetour, onChange, toasts }) {
+function FicheOperation({ idOperation, utilisateurCourant, caisses, utilisateurs, parametres, tiers, collaborateurs, onRetour, onChange, toasts }) {
   const [operation, setOperation] = useState(null);
   const [historique, setHistorique] = useState([]);
   const [validations, setValidations] = useState([]);
   const [justificatifs, setJustificatifs] = useState([]);
   const [commentaire, setCommentaire] = useState("");
+  const [modeEdition, setModeEdition] = useState(false);
+  const [valeursEdition, setValeursEdition] = useState(null);
   const refFichier = React.useRef(null);
 
   const charger = useCallback(async () => {
@@ -523,8 +536,72 @@ function FicheOperation({ idOperation, utilisateurCourant, caisses, utilisateurs
   if (!operation) return h("div", { className: "chargement" }, "Chargement...");
 
   const nomUtilisateur = (id) => (utilisateurs.find((u) => u.Id_Utilisateur === id) || {}).Nom_Complet || (id ? `#${id}` : "—");
+  // Responsable = un collaborateur Sage (F_COLLABORATEUR.CO_No), PAS un utilisateur de l'application.
+  const nomResponsable = (id) => (collaborateurs.find((c) => c.CO_No === id) || {}).Nom_Complet || (id ? `#${id}` : "—");
+  const nomBeneficiaire = (ctNum) => (tiers.find((t) => t.CT_Num === ctNum) || {}).Intitule || (ctNum || "—");
   const estCreateur = utilisateurCourant.Id_Utilisateur === operation.Cree_Par;
   const estManager = utilisateurCourant.Role === "MANAGER";
+  // Phase 10 : BROUILLON et ANNULE se comportent de façon identique - modifiables,
+  // supprimables (MANAGER uniquement) et validables directement. VALIDE reste
+  // verrouillé (sa seule porte de sortie : "remettre en brouillon", MANAGER).
+  const statutModifiable = ["BROUILLON", "ANNULE"].includes(operation.Statut);
+  const peutModifier = statutModifiable && (estCreateur || estManager);
+  const peutSupprimer = estManager && statutModifiable;
+  const peutValider = statutModifiable && (estCreateur || estManager);
+
+  const demarrerEdition = () => {
+    setValeursEdition({
+      type_operation: operation.Type_Operation,
+      id_caisse: operation.Id_Caisse,
+      date_operation: operation.Date_Operation ? operation.Date_Operation.slice(0, 16) : "",
+      societe: operation.Societe || "",
+      montant: operation.Montant,
+      sens_solde: operation.Sens_Solde,
+      id_motif: operation.Id_Motif || "",
+      compte_financier: operation.Compte_Financier || "",
+      compte_analytique: operation.Compte_Analytique || "",
+      beneficiaire: operation.Beneficiaire || "",
+      responsable: operation.Responsable || "",
+      projet: operation.Projet || "",
+      observation: operation.Observation || "",
+      devise: operation.Devise || "EUR",
+    });
+    setModeEdition(true);
+  };
+  const majEdition = (champ) => (e) => setValeursEdition({ ...valeursEdition, [champ]: e.target.value });
+  const annulerEdition = () => { setModeEdition(false); setValeursEdition(null); };
+
+  const enregistrerEdition = async (e) => {
+    e.preventDefault();
+    if (!valeursEdition.id_caisse) { toasts.ajouter("Veuillez sélectionner une caisse.", "erreur"); return; }
+    if (!valeursEdition.montant || Number(valeursEdition.montant) <= 0) { toasts.ajouter("Le montant doit être supérieur à zéro.", "erreur"); return; }
+    if (valeursEdition.type_operation === "REMBOURSEMENT" && !valeursEdition.sens_solde) {
+      toasts.ajouter("Pour un remboursement, précisez s'il augmente ou diminue le solde.", "erreur");
+      return;
+    }
+    try {
+      const corps = {
+        utilisateur_id: utilisateurCourant.Id_Utilisateur,
+        type_operation: valeursEdition.type_operation, id_caisse: Number(valeursEdition.id_caisse),
+        date_operation: valeursEdition.date_operation, societe: valeursEdition.societe || null,
+        montant: Number(valeursEdition.montant), sens_solde: valeursEdition.sens_solde || null,
+        id_motif: valeursEdition.id_motif ? Number(valeursEdition.id_motif) : null,
+        compte_financier: valeursEdition.compte_financier || null, compte_analytique: valeursEdition.compte_analytique || null,
+        beneficiaire: valeursEdition.beneficiaire || null,
+        responsable: valeursEdition.responsable ? Number(valeursEdition.responsable) : null,
+        projet: valeursEdition.projet || null, observation: valeursEdition.observation || null,
+        devise: valeursEdition.devise,
+      };
+      const resultat = await api.modifierOperation(idOperation, corps);
+      toasts.ajouter(resultat.message, "succes");
+      setModeEdition(false);
+      setValeursEdition(null);
+      await charger();
+      onChange();
+    } catch (err) {
+      toasts.ajouter(err.message, "erreur");
+    }
+  };
 
   const agir = async (action) => {
     try {
@@ -588,6 +665,14 @@ function FicheOperation({ idOperation, utilisateurCourant, caisses, utilisateurs
       ),
       h(ProgressionWorkflow, { statut: operation.Statut }),
 
+      modeEdition
+        ? h(
+            "div",
+            { className: "champ", style: { background: "var(--couleur-fond-alerte, #fff8e1)", padding: "8px 12px", borderRadius: "6px", marginBottom: "10px" } },
+            "Mode modification - seule une opération en brouillon ou annulée peut être modifiée. Les champs sont verrouillés dès qu'elle est validée ou comptabilisée."
+          )
+        : null,
+
       h(
         "div",
         { className: "section" },
@@ -595,11 +680,41 @@ function FicheOperation({ idOperation, utilisateurCourant, caisses, utilisateurs
         h(
           "div",
           { className: "ligne-champs" },
-          champLectureSeule("Type", operation.Type_Operation),
-          champLectureSeule("Date", new Date(operation.Date_Operation).toLocaleString("fr-FR")),
-          champLectureSeule("Caisse", (caisses.find((c) => c.Id_Caisse === operation.Id_Caisse) || {}).Nom_Caisse),
-          champLectureSeule("Société", operation.Societe)
-        )
+          modeEdition
+            ? champEditable("Type", h(
+                "select",
+                { value: valeursEdition.type_operation, onChange: majEdition("type_operation") },
+                h("option", { value: "ALIMENTATION" }, "Alimentation"),
+                h("option", { value: "DEPENSE" }, "Dépense"),
+                h("option", { value: "REMBOURSEMENT" }, "Remboursement")
+              ))
+            : champLectureSeule("Type", operation.Type_Operation),
+          modeEdition
+            ? champEditable("Date", h("input", { type: "datetime-local", value: valeursEdition.date_operation, onChange: majEdition("date_operation") }))
+            : champLectureSeule("Date", new Date(operation.Date_Operation).toLocaleString("fr-FR")),
+          modeEdition
+            ? champEditable("Caisse *", h(
+                "select",
+                { value: valeursEdition.id_caisse, onChange: majEdition("id_caisse") },
+                caisses.map((c) => h("option", { key: c.Id_Caisse, value: c.Id_Caisse }, c.Nom_Caisse))
+              ))
+            : champLectureSeule("Caisse", (caisses.find((c) => c.Id_Caisse === operation.Id_Caisse) || {}).Nom_Caisse),
+          modeEdition
+            ? champEditable("Société", h("input", { value: valeursEdition.societe, onChange: majEdition("societe") }))
+            : champLectureSeule("Société", operation.Societe)
+        ),
+        modeEdition && valeursEdition.type_operation === "REMBOURSEMENT" &&
+          h(
+            "div",
+            { className: "ligne-champs", style: { marginTop: "10px" } },
+            champEditable("Ce remboursement... (jamais déduit automatiquement)", h(
+              "select",
+              { value: valeursEdition.sens_solde || "", onChange: majEdition("sens_solde") },
+              h("option", { value: "" }, "— À préciser —"),
+              h("option", { value: "ENTREE" }, "Augmente le solde de la caisse"),
+              h("option", { value: "SORTIE" }, "Diminue le solde de la caisse")
+            ))
+          )
       ),
       h(
         "div",
@@ -608,10 +723,18 @@ function FicheOperation({ idOperation, utilisateurCourant, caisses, utilisateurs
         h(
           "div",
           { className: "ligne-champs" },
-          champLectureSeule("Montant", `${Number(operation.Montant).toFixed(2)} ${operation.Devise}`),
-          champLectureSeule("Sens sur le solde", operation.Sens_Solde === "ENTREE" ? "Augmente le solde" : "Diminue le solde"),
-          champLectureSeule("Compte financier", operation.Compte_Financier),
-          champLectureSeule("Répartition analytique", operation.Compte_Analytique)
+          modeEdition
+            ? champEditable("Montant *", h("input", { type: "number", step: "0.01", value: valeursEdition.montant, onChange: majEdition("montant") }))
+            : champLectureSeule("Montant", `${Number(operation.Montant).toFixed(2)} ${operation.Devise}`),
+          modeEdition
+            ? champEditable("Devise", h("input", { value: valeursEdition.devise, onChange: majEdition("devise") }))
+            : champLectureSeule("Sens sur le solde", operation.Sens_Solde === "ENTREE" ? "Augmente le solde" : "Diminue le solde"),
+          modeEdition
+            ? champEditable("Compte financier (Sage)", h("input", { value: valeursEdition.compte_financier, onChange: majEdition("compte_financier") }))
+            : champLectureSeule("Compte financier", operation.Compte_Financier),
+          modeEdition
+            ? champEditable("Répartition analytique", h("input", { value: valeursEdition.compte_analytique, onChange: majEdition("compte_analytique") }))
+            : champLectureSeule("Répartition analytique", operation.Compte_Analytique)
         )
       ),
       h(
@@ -621,11 +744,37 @@ function FicheOperation({ idOperation, utilisateurCourant, caisses, utilisateurs
         h(
           "div",
           { className: "ligne-champs" },
-          champLectureSeule("Bénéficiaire", operation.Beneficiaire),
-          champLectureSeule("Responsable", nomUtilisateur(operation.Responsable)),
-          champLectureSeule("Projet", operation.Projet),
-          champLectureSeule("Observation", operation.Observation)
-        )
+          modeEdition
+            ? champEditable("Motif", h(
+                "select",
+                { value: valeursEdition.id_motif, onChange: majEdition("id_motif") },
+                h("option", { value: "" }, "— Aucun —"),
+                (parametres || []).filter((p) => p.Categorie === "MOTIF").map((p) => h("option", { key: p.Id_Parametre, value: p.Id_Parametre }, p.Libelle))
+              ))
+            : null,
+          modeEdition
+            ? champEditable("Bénéficiaire", h(
+                "select",
+                { value: valeursEdition.beneficiaire || "", onChange: majEdition("beneficiaire") },
+                h("option", { value: "" }, "— Aucun —"),
+                tiers.map((t) => h("option", { key: t.CT_Num, value: t.CT_Num }, t.Intitule))
+              ))
+            : champLectureSeule("Bénéficiaire", nomBeneficiaire(operation.Beneficiaire)),
+          modeEdition
+            ? champEditable("Responsable", h(
+                "select",
+                { value: valeursEdition.responsable || "", onChange: majEdition("responsable") },
+                h("option", { value: "" }, "— Aucun —"),
+                collaborateurs.map((c) => h("option", { key: c.CO_No, value: c.CO_No }, c.Nom_Complet))
+              ))
+            : champLectureSeule("Responsable", nomResponsable(operation.Responsable)),
+          modeEdition
+            ? champEditable("Projet", h("input", { value: valeursEdition.projet, onChange: majEdition("projet") }))
+            : champLectureSeule("Projet", operation.Projet)
+        ),
+        modeEdition
+          ? h("div", { className: "champ", style: { marginTop: "12px" } }, h("label", null, "Observation"), h("textarea", { rows: 3, value: valeursEdition.observation, onChange: majEdition("observation") }))
+          : champLectureSeule("Observation", operation.Observation)
       ),
       h(
         "div",
@@ -641,38 +790,51 @@ function FicheOperation({ idOperation, utilisateurCourant, caisses, utilisateurs
         )
       ),
 
-      h(
-        "div",
-        { className: "champ", style: { marginBottom: "10px" } },
-        h("label", null, "Commentaire (optionnel, associé à la prochaine action)"),
-        h("input", { value: commentaire, onChange: (e) => setCommentaire(e.target.value) })
-      ),
-      h(
-        "div",
-        { className: "barre-boutons" },
-        operation.Statut === "BROUILLON" && (estCreateur || estManager) &&
-          h("button", { className: "bouton", onClick: () => agir("valider"), disabled: !estManager, title: !estManager ? "Réservé à un MANAGER" : "" }, "Valider"),
-        operation.Statut === "BROUILLON" && (estCreateur || estManager) &&
-          h("button", { className: "bouton danger", onClick: () => agir("annuler") }, "Annuler"),
-        operation.Statut === "BROUILLON" && (estCreateur || estManager) &&
-          h("button", { className: "bouton danger", onClick: () => agir("supprimer") }, "Supprimer"),
-        operation.Statut === "VALIDE" &&
-          h("button", { className: "bouton succes", onClick: () => agir("comptabiliser"), disabled: !estManager, title: !estManager ? "Réservé à un MANAGER" : "" }, "Comptabiliser"),
-        operation.Statut === "VALIDE" &&
-          h("button", { className: "bouton danger", onClick: () => agir("annuler"), disabled: !estManager, title: !estManager ? "Réservé à un MANAGER" : "" }, "Annuler"),
-        operation.Statut === "VALIDE" &&
-          h("button", { className: "bouton secondaire", onClick: () => agir("brouillon"), disabled: !estManager, title: !estManager ? "Réservé à un MANAGER" : "" }, "Remettre en brouillon"),
-        h(
-          "button",
-          {
-            className: "bouton secondaire",
-            onClick: imprimer,
-            disabled: !["VALIDE", "COMPTABILISE"].includes(operation.Statut),
-            title: !["VALIDE", "COMPTABILISE"].includes(operation.Statut) ? "Désactivé tant que l'opération n'est pas Validée" : "",
-          },
-          "Imprimer (PDF)"
-        )
-      ),
+      modeEdition
+        ? h(
+            "form",
+            { className: "barre-boutons", onSubmit: enregistrerEdition },
+            h("button", { type: "submit", className: "bouton" }, "Enregistrer les modifications"),
+            h("button", { type: "button", className: "bouton secondaire", onClick: annulerEdition }, "Annuler la modification")
+          )
+        : h(
+            React.Fragment,
+            null,
+            h(
+              "div",
+              { className: "champ", style: { marginBottom: "10px" } },
+              h("label", null, "Commentaire (optionnel, associé à la prochaine action)"),
+              h("input", { value: commentaire, onChange: (e) => setCommentaire(e.target.value) })
+            ),
+            h(
+              "div",
+              { className: "barre-boutons" },
+              peutModifier &&
+                h("button", { className: "bouton secondaire", onClick: demarrerEdition }, "Modifier"),
+              peutValider &&
+                h("button", { className: "bouton", onClick: () => agir("valider"), disabled: !estManager, title: !estManager ? "Réservé à un MANAGER" : "" }, "Valider"),
+              operation.Statut === "BROUILLON" && (estCreateur || estManager) &&
+                h("button", { className: "bouton danger", onClick: () => agir("annuler") }, "Annuler"),
+              peutSupprimer &&
+                h("button", { className: "bouton danger", onClick: () => agir("supprimer") }, "Supprimer"),
+              operation.Statut === "VALIDE" &&
+                h("button", { className: "bouton succes", onClick: () => agir("comptabiliser"), disabled: !estManager, title: !estManager ? "Réservé à un MANAGER" : "" }, "Comptabiliser"),
+              operation.Statut === "VALIDE" &&
+                h("button", { className: "bouton danger", onClick: () => agir("annuler"), disabled: !estManager, title: !estManager ? "Réservé à un MANAGER" : "" }, "Annuler"),
+              ["VALIDE", "ANNULE"].includes(operation.Statut) &&
+                h("button", { className: "bouton secondaire", onClick: () => agir("brouillon"), disabled: !estManager, title: !estManager ? "Réservé à un MANAGER" : "" }, "Remettre en brouillon"),
+              h(
+                "button",
+                {
+                  className: "bouton secondaire",
+                  onClick: imprimer,
+                  disabled: !["VALIDE", "COMPTABILISE"].includes(operation.Statut),
+                  title: !["VALIDE", "COMPTABILISE"].includes(operation.Statut) ? "Désactivé tant que l'opération n'est pas Validée" : "",
+                },
+                "Imprimer (PDF)"
+              )
+            )
+          ),
 
       h(
         "div",
@@ -744,10 +906,16 @@ function champLectureSeule(libelle, valeur) {
   );
 }
 
+function champEditable(libelle, elementSaisie) {
+  return h("div", { className: "champ" }, h("label", null, libelle), elementSaisie);
+}
+
 // --- Gestion des caisses ------------------------------------------------------------
 
-function VueCaisses({ caisses, onCree, toasts }) {
+function VueCaisses({ caisses, utilisateurCourant, onCree, toasts }) {
   const [valeurs, setValeurs] = useState({ code_caisse: "", nom_caisse: "", societe: "", solde_initial: "0", numero_caisse_sage: "" });
+  const [synchroEnCours, setSynchroEnCours] = useState(false);
+  const estManager = utilisateurCourant.Role === "MANAGER";
   const maj = (champ) => (e) => setValeurs({ ...valeurs, [champ]: e.target.value });
 
   const soumettre = async (e) => {
@@ -766,14 +934,45 @@ function VueCaisses({ caisses, onCree, toasts }) {
     }
   };
 
+  const synchroniserDepuisSage = async () => {
+    setSynchroEnCours(true);
+    try {
+      const [resultatCaisses, resultatReferentiels] = await Promise.all([
+        api.synchroniserCaissesDepuisSage(utilisateurCourant.Id_Utilisateur),
+        api.synchroniserReferentielsDepuisSage(utilisateurCourant.Id_Utilisateur),
+      ]);
+      toasts.ajouter(resultatCaisses.message, "succes");
+      toasts.ajouter(resultatReferentiels.message, "succes");
+      onCree();
+    } catch (err) {
+      toasts.ajouter(err.message, "erreur");
+    } finally {
+      setSynchroEnCours(false);
+    }
+  };
+
   return h(
     "div",
     null,
+    h(
+      "div",
+      { className: "barre-action" },
+      h(
+        "button",
+        {
+          className: "bouton secondaire",
+          onClick: synchroniserDepuisSage,
+          disabled: !estManager || synchroEnCours,
+          title: !estManager ? "Réservé à un MANAGER" : "",
+        },
+        synchroEnCours ? "Synchronisation..." : "Synchroniser depuis Sage"
+      )
+    ),
     h("div", { className: "groupe-titre" }, "Caisses existantes"),
     h(
       "table",
       { className: "liste" },
-      h("thead", null, h("tr", null, h("th", null, "Code"), h("th", null, "Nom"), h("th", null, "Société"), h("th", null, "Solde"), h("th", null, "Statut"))),
+      h("thead", null, h("tr", null, h("th", null, "Code"), h("th", null, "Nom"), h("th", null, "Société"), h("th", null, "N° caisse Sage"), h("th", null, "Solde"), h("th", null, "Statut"))),
       h(
         "tbody",
         null,
@@ -782,6 +981,7 @@ function VueCaisses({ caisses, onCree, toasts }) {
             "tr",
             { key: c.Id_Caisse },
             h("td", null, c.Code_Caisse), h("td", null, c.Nom_Caisse), h("td", null, c.Societe),
+            h("td", null, c.Numero_Caisse_Sage ?? "—"),
             h("td", null, `${Number(c.Solde_Actuel).toFixed(2)} ${c.Devise}`), h("td", null, c.Statut)
           )
         )
@@ -814,6 +1014,8 @@ function App() {
   const [caisses, setCaisses] = useState([]);
   const [utilisateurs, setUtilisateurs] = useState([]);
   const [parametres, setParametres] = useState([]);
+  const [tiers, setTiers] = useState([]);
+  const [collaborateurs, setCollaborateurs] = useState([]);
   const [operations, setOperations] = useState([]);
   const [filtres, setFiltres] = useState({});
   const [groupePar, setGroupePar] = useState("");
@@ -842,10 +1044,12 @@ function App() {
   };
 
   const rafraichirReferentiels = useCallback(async () => {
-    const [c, u, p, m] = await Promise.all([
+    const [c, u, p, m, t, co] = await Promise.all([
       api.listerCaisses(), api.listerUtilisateurs(), api.listerParametres(), api.lireModeEcriture(),
+      api.listerTiers(), api.listerCollaborateurs(),
     ]);
     setCaisses(c.resultats); setUtilisateurs(u.resultats); setParametres(p.resultats); setLectureSeule(m.lecture_seule);
+    setTiers(t.resultats); setCollaborateurs(co.resultats);
   }, []);
 
   const rafraichirOperations = useCallback(async () => {
@@ -891,7 +1095,7 @@ function App() {
   let contenu;
   if (idOperationOuverte) {
     contenu = h(FicheOperation, {
-      idOperation: idOperationOuverte, utilisateurCourant: utilisateurConnecte, caisses, utilisateurs,
+      idOperation: idOperationOuverte, utilisateurCourant: utilisateurConnecte, caisses, utilisateurs, parametres, tiers, collaborateurs,
       onRetour: () => setIdOperationOuverte(null),
       onChange: () => { rafraichirOperations(); rafraichirReferentiels(); },
       toasts,
@@ -900,18 +1104,18 @@ function App() {
     contenu = h(Dashboard, { caisses, operations, onNouvelleOperation: () => setVue("nouvelle-operation") });
   } else if (vue === "nouvelle-operation") {
     contenu = h(FormulaireOperation, {
-      caisses, parametres, utilisateurCourant: utilisateurConnecte,
+      caisses, parametres, tiers, collaborateurs, utilisateurCourant: utilisateurConnecte,
       onCree: () => { setVue("operations"); rafraichirOperations(); },
       onAnnulerSaisie: () => setVue("operations"),
       toasts,
     });
   } else if (vue === "operations") {
     contenu = h(ListeOperations, {
-      operations, caisses, utilisateurs, filtres, onFiltres: setFiltres, groupePar, onGroupePar: setGroupePar,
+      operations, caisses, utilisateurs, collaborateurs, filtres, onFiltres: setFiltres, groupePar, onGroupePar: setGroupePar,
       onOuvrir: setIdOperationOuverte, onNouvelleOperation: () => setVue("nouvelle-operation"),
     });
   } else if (vue === "caisses") {
-    contenu = h(VueCaisses, { caisses, onCree: rafraichirReferentiels, toasts });
+    contenu = h(VueCaisses, { caisses, utilisateurCourant: utilisateurConnecte, onCree: rafraichirReferentiels, toasts });
   }
 
   return h(
