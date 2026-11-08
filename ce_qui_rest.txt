@@ -1,0 +1,220 @@
+Analyse des logique de sage et les lois d’opration (sql ou objet metier )
+Synchronisation des operation via Une phase de code speciale pour synchronisé les operation  
+Nomée Service de synchronisation ( Validation · Contrôle · Transformation · Transmission )
+avec anulation (operation inverse ) avec justif
+L’horaire de synchornisation ? 
+declenche ? 
+les etat de synchro depends de quoi ?
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Claude Code en mode analyse d'abord.
+
+tu gardes le contrôle sur les décisions métier et techniques avant de lancer le développement.
+
+4. Règle fondamentale : synchronisation uniquement après validation
+Ne reproduis pas tous les CRUD de SAGE_CAISSE_APP dans BIJOU.
+
+Applique les règles suivantes :
+
+
+Action	SAGE_CAISSE_APP	BIJOU
+Création BROUILLON	Enregistrement	Aucune modification
+Modification BROUILLON	Modification	Aucune modification
+Validation	Enregistrement + demande de synchronisation	Création du mouvement financier
+Annulation avant synchronisation	Annulation locale	Aucune modification
+Annulation après synchronisation	Enregistrement de l'annulation	Création d'un mouvement inverse
+Remise en brouillon après validation	Enregistrement de la demande	Compensation préalable du mouvement initial
+Une opération validée ne doit pas être directement modifiable.
+
+Toute annulation d'une opération déjà transmise à Sage 100 doit déclencher un mouvement compensatoire adapté à son type.
+
+Exemples :
+
+Alimentation : crédit initial de 1 000 DH, puis débit compensatoire de 1 000 DH.
+Dépense : débit initial de 500 DH, puis crédit compensatoire de 500 DH.
+Transfert : compensation des deux mouvements, débit et crédit, selon les règles métier.
+Ne jamais supprimer arbitrairement un mouvement déjà comptabilisé.
+
+5. Architecture de synchronisation souhaitée
+Je privilégie une synchronisation automatique quasi immédiate, quelques secondes après la validation d'une opération.
+
+Le processus attendu :
+
+L'employé crée une opération dans SAGE_CAISSE_APP.
+L'opération reste modifiable tant qu'elle est en BROUILLON.
+L'employé clique sur VALIDÉ.
+L'application contrôle les champs obligatoires et les règles métier.
+L'opération est enregistrée dans SAGE_CAISSE_APP.
+Une demande de synchronisation est enregistrée dans une file d'attente locale.
+Un service Python indépendant récupère cette demande.
+Il transforme les données selon les exigences de Sage 100.
+Il transmet le mouvement via le mécanisme d'intégration supporté.
+Il vérifie le résultat et met à jour le statut de synchronisation.
+L'utilisateur ne doit pas attendre la fin de la synchronisation pour continuer à travailler.
+
+Prévoir également une vérification automatique chaque nuit afin de :
+
+Détecter les opérations non synchronisées.
+Relancer les traitements en échec.
+Détecter les doublons.
+Comparer les références des opérations entre les deux bases.
+Identifier les incohérences.
+Produire un rapport des anomalies.
+6. Séparation des statuts
+Ne mélange jamais le statut métier et le statut technique de synchronisation.
+
+Statuts métier :
+
+BROUILLON
+VALIDÉ
+ANNULÉ
+Statuts de synchronisation :
+
+NON_CONCERNE
+EN_ATTENTE
+EN_COURS
+SYNCHRONISÉ
+ÉCHEC
+COMPENSATION_EN_ATTENTE
+COMPENSÉ
+Ces statuts doivent permettre de savoir précisément si une opération est validée dans l'application, transmise à Sage 100 ou compensée après annulation.
+
+7. Mécanismes techniques obligatoires
+Étudier et prévoir les mécanismes suivants :
+
+Transaction Outbox
+L'enregistrement de l'opération validée et la création de sa demande de synchronisation doivent être réalisés dans une même transaction SQL locale.
+
+Idempotence
+Chaque opération doit posséder un identifiant unique permettant d'éviter les mouvements en double, même en cas de répétition d'une requête ou de redémarrage du service.
+
+Gestion des erreurs
+Prévoir :
+
+Les tentatives automatiques de reprise.
+La conservation des messages d'erreur.
+La gestion des échecs partiels.
+La possibilité de relancer manuellement une synchronisation.
+Une protection contre les compensations exécutées plusieurs fois.
+Traçabilité
+Conserver :
+
+L'identifiant de l'opération locale.
+La référence du mouvement dans Sage 100.
+La date de validation.
+La date de synchronisation.
+Le résultat du traitement.
+Les informations de compensation.
+L'historique des tentatives et des erreurs.
+8. Point critique : identifier le mécanisme officiellement supporté par Sage 100
+Actuellement, notre connexion à BIJOU se fait directement via SQL Server.
+
+Cependant, ne considère pas que l'accès SQL direct autorise les INSERT, UPDATE ou DELETE dans les tables de Sage 100.
+
+Avant toute implémentation, tu dois :
+
+Identifier la version exacte de Sage 100.
+Identifier les modules utilisés pour la gestion des caisses.
+Examiner les mécanismes d'intégration disponibles dans notre environnement.
+Vérifier la disponibilité et la compatibilité des Sage 100 Objets Métiers, SDK, API ou autres interfaces officiellement supportées.
+Identifier le mécanisme adapté pour créer :
+Une alimentation de caisse.
+Une dépense.
+Un transfert entre caisses.
+Un mouvement compensatoire après annulation.
+Identifier les tables et documents concernés.
+Déterminer les champs obligatoires, les contrôles métier, les numérotations et les relations comptables.
+Privilégier les mécanismes officiellement supportés par Sage 100 pour les écritures.
+
+La connexion SQL Server directe peut être conservée pour la lecture et l'analyse des données de BIJOU.
+
+Ne développe aucun mécanisme d'écriture SQL direct dans BIJOU sans avoir démontré qu'il est officiellement supporté et validé pour notre version.
+
+9. Ta première mission : analyser et me poser des questions
+Avant de commencer le développement, analyse le projet existant.
+
+Examine notamment :
+
+L'architecture Python.
+Les modèles et entités.
+Les repositories et services.
+Les contrôleurs et interfaces.
+Les tables de SAGE_CAISSE_APP.
+Les tables de BIJOU.
+Les mécanismes actuels de validation et d'annulation.
+Les connexions SQL Server.
+Les rôles et autorisations utilisateurs.
+Ensuite, identifie les informations qui te manquent pour définir une architecture fiable.
+
+Tu dois toi-même me poser les questions nécessaires sous forme de QCM, et non supposer les réponses.
+
+Exemples de sujets à clarifier :
+
+Version exacte de Sage 100.
+Module Sage utilisé.
+Environnement d'installation et d'hébergement.
+Disponibilité des Objets Métiers ou SDK.
+Gestion des caisses et nature des mouvements comptables.
+Règles d'annulation et de compensation.
+Gestion des erreurs et des reprises.
+Autorisations du Manager.
+Fréquence et supervision de la synchronisation.
+Pour chaque QCM :
+
+Présente une question claire.
+Propose des réponses compréhensibles.
+Autorise une réponse « Autre » ou « Je ne sais pas ».
+Explique brièvement pourquoi cette information est importante.
+Ne pose pas toutes les questions techniques sans avoir d'abord analysé le code existant. Évite les questions dont les réponses sont déjà disponibles dans le projet.
+
+10. Résultat attendu avant implémentation
+Après avoir obtenu mes réponses, présente une proposition architecturale détaillée comprenant :
+
+Le schéma global des flux entre les deux bases.
+Le fonctionnement du service Python de synchronisation.
+L'organisation de la file d'attente Outbox.
+Les règles de création des mouvements Sage 100.
+Les règles de compensation.
+La gestion des statuts.
+La stratégie d'idempotence.
+La gestion des erreurs et des reprises.
+La réconciliation nocturne.
+Les tables et fichiers qui devront être créés ou modifiés.
+Présente également les avantages, risques et limites de la solution proposée.
+
+11. Consigne finale
+Pour cette première étape, ne modifie aucun code et aucune donnée dans BIJOU.
+
+Je veux d'abord comprendre l'architecture existante, répondre à tes QCM et valider ensemble la solution technique.
+
+Après validation de l'architecture, nous passerons à l'implémentation progressivement, étape par étape, sans perturber les fonctionnalités existantes.
+
+Mon objectif est de construire une intégration fiable, maintenable, sécurisée et évolutive entre notre application Python et Sage 100.

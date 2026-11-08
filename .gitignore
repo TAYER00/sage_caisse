@@ -5,3 +5,4 @@ __pycache__/
 .pytest_cache/
 stockage_justificatifs/
 logs/
+*.mp4
